@@ -1,0 +1,4 @@
+[submodule "lib/DebtHunter-Tool"]
+	path = lib/DebtHunter-Tool
+	url = https://github.com/suu-y/DebtHunter-Tool.git
+	branch = only-productionCode

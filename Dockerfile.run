@@ -10,6 +10,6 @@ COPY mySQL.properties .
 # Update MySQL host to connect from container to host machine
 RUN sed -i 's/URL=localhost/URL=host.docker.internal/' mySQL.properties
 
-# Run the analysis
-CMD ["java", "-jar", "satd-analyzer-jar-with-all-dependencies.jar", "-r", "repos.txt", "-d", "mySQL.properties", "-e"]
+# Run the analysis with DebtHunter detector
+CMD ["java", "-jar", "satd-analyzer-jar-with-all-dependencies.jar", "-r", "repos.txt", "-d", "mySQL.properties", "-t", "debthunter", "-e"]
 

@@ -56,13 +56,13 @@
             <systemPath>${project.basedir}/lib/satd_detector.jar</systemPath>
         </dependency>
 
-        <!-- DebtHunter Tool Implementation from jar -->
+        <!-- DebtHunter Tool Implementation from jar (without JavaParser to avoid conflicts) -->
         <dependency>
             <groupId>debthunter</groupId>
             <artifactId>debthunter</artifactId>
             <version>productionCode</version>
             <scope>system</scope>
-            <systemPath>${project.basedir}/lib/DebtHunter-Tool/DebtHunter-Tool.jar</systemPath>
+            <systemPath>${project.basedir}/lib/DebtHunter-Tool/DebtHunter-Tool-no-javaparser.jar</systemPath>
         </dependency>
 
         <!-- Weka for DebtHunter -->

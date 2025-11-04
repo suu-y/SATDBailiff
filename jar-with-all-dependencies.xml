@@ -15,7 +15,7 @@ http://maven.apache.org/plugins/maven-assembly-plugin/descriptor-refs.html -->
             <unpack>true</unpack>
             <scope>runtime</scope>
         </dependencySet>
-        <!-- This dependency set was added to include system scopes -->
+        <!-- Include system-scoped dependencies (satd_detector.jar and DebtHunter-Tool-no-javaparser.jar) -->
         <dependencySet>
             <outputDirectory>/</outputDirectory>
             <useProjectArtifact>true</useProjectArtifact>
@@ -23,4 +23,23 @@ http://maven.apache.org/plugins/maven-assembly-plugin/descriptor-refs.html -->
             <scope>system</scope>
         </dependencySet>
     </dependencySets>
+    <!-- Include DebtHunter resources -->
+    <fileSets>
+        <!-- Include pre-trained models -->
+        <fileSet>
+            <directory>lib/DebtHunter-Tool/preTrainedModels</directory>
+            <outputDirectory>/lib/DebtHunter-Tool/preTrainedModels</outputDirectory>
+            <includes>
+                <include>*.model</include>
+            </includes>
+        </fileSet>
+        <!-- Include dictionary files -->
+        <fileSet>
+            <directory>lib/DebtHunter-Tool/dic</directory>
+            <outputDirectory>/lib/DebtHunter-Tool/dic</outputDirectory>
+            <includes>
+                <include>*.txt</include>
+            </includes>
+        </fileSet>
+    </fileSets>
 </assembly>

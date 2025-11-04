@@ -10,7 +10,7 @@ import edu.rit.se.satd.model.SATDInstanceInFile;
 import edu.rit.se.util.JavaParseUtil;
 import edu.rit.se.util.KnownParserException;
 import edu.rit.se.util.SimilarityUtil;
-import javafx.util.Pair;
+import java.util.AbstractMap;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.Edit;
@@ -243,7 +243,7 @@ public class OldFileDifferencer extends FileDifferencer {
     private List<SATDInstanceInFile> getOtherInstancesInCommitFiles(GroupedComment commentToMatch, String curPath) {
         final List<SATDInstanceInFile> allInstances = this.otherDiffEntries.stream()
                 .filter(diffEntry -> !diffEntry.getOldPath().equals(curPath))
-                .map(diffEntry -> new Pair(diffEntry, this.getCommentsInFileInNewRepository(diffEntry.getNewPath())))
+                .map(diffEntry -> new AbstractMap.SimpleEntry<>(diffEntry, this.getCommentsInFileInNewRepository(diffEntry.getNewPath())))
                 .flatMap(pair ->
                         ((RepositoryComments)pair.getValue()).getComments().stream()
                                 // Only comments that match this comment

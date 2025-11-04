@@ -1,0 +1,15 @@
+FROM maven:3.8.6-openjdk-8
+
+WORKDIR /app
+
+# Copy JAR file and configuration files
+COPY target/satd-analyzer-jar-with-all-dependencies.jar .
+COPY repos.txt .
+COPY mySQL.properties .
+
+# Update MySQL host to connect from container to host machine
+RUN sed -i 's/URL=localhost/URL=host.docker.internal/' mySQL.properties
+
+# Run the analysis
+CMD ["java", "-jar", "satd-analyzer-jar-with-all-dependencies.jar", "-r", "repos.txt", "-d", "mySQL.properties", "-e"]
+

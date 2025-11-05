@@ -2,7 +2,9 @@ package edu.rit.se;
 
 import edu.rit.se.satd.SATDMiner;
 import edu.rit.se.satd.comment.IgnorableWords;
+import edu.rit.se.satd.detector.SATDDetector;
 import edu.rit.se.satd.detector.SATDDetectorImpl;
+import edu.rit.se.satd.detector.DebtHunterDetectorImpl;
 import edu.rit.se.satd.mining.diff.CommitToCommitDiff;
 import edu.rit.se.satd.writer.MySQLOutputWriter;
 import edu.rit.se.satd.writer.OutputWriter;
@@ -27,6 +29,7 @@ public class Main {
     private static final String ARG_NAME_DIFF_ALGORITHM = "a";
     private static final String ARG_NAME_ERROR_OUTPUT = "e";
     private static final String ARG_NAME_NORMALIZED_LEVENSHTEIN_DISTANCE = "l";
+    private static final String ARG_NAME_DETECTOR_TYPE = "t";
     private static final String PROJECT_NAME_CLI = "satd-analyzer";
 
     public static void main(String[] args) throws Exception {
@@ -80,35 +83,55 @@ public class Main {
                             cmd.getOptionValue(
                                     ARG_NAME_NORMALIZED_LEVENSHTEIN_DISTANCE, "0.5")));
 
+            // Determine which detector to use (default to DebtHunter)
+            SATDDetector detector;
+            String detectorType = cmd.getOptionValue(ARG_NAME_DETECTOR_TYPE, "debthunter");
+            switch (detectorType.toLowerCase()) {
+                case "satd":
+                case "original":
+                    detector = new SATDDetectorImpl();
+                    System.out.println("Using original SATD detector");
+                    break;
+                case "debthunter":
+                default:
+                    detector = new DebtHunterDetectorImpl();
+                    System.out.println("Using DebtHunter detector");
+                    break;
+            }
+
             // Read the supplied repos from the file
             final File inFile = new File(reposFile);
             final Scanner inFileReader = new Scanner(inFile);
 
-            // Find the SATD in each supplied repository
-            while (inFileReader.hasNext()) {
+            try {
+                // Find the SATD in each supplied repository
+                while (inFileReader.hasNext()) {
 
-                final String[] repoEntry = inFileReader.next().split(",");
+                    final String[] repoEntry = inFileReader.next().split(",");
 
-                if( repoEntry.length > 0 ) {
+                    if( repoEntry.length > 0 ) {
 
-                    final SATDMiner miner = new SATDMiner(repoEntry[0], new SATDDetectorImpl());
+                        final SATDMiner miner = new SATDMiner(repoEntry[0], detector);
 
-                    final String headCommit = repoEntry.length > 1 ? repoEntry[1] : null;
+                        final String headCommit = repoEntry.length > 1 ? repoEntry[1] : null;
 
-                    // Set username and password if supplied
-                    if (cmd.hasOption(ARG_NAME_GH_USERNAME)) {
-                        miner.setGithubUsername(cmd.getOptionValue(ARG_NAME_GH_USERNAME));
+                        // Set username and password if supplied
+                        if (cmd.hasOption(ARG_NAME_GH_USERNAME)) {
+                            miner.setGithubUsername(cmd.getOptionValue(ARG_NAME_GH_USERNAME));
+                        }
+                        if (cmd.hasOption(ARG_NAME_GH_PASSWORD)) {
+                            miner.setGithubPassword(cmd.getOptionValue(ARG_NAME_GH_PASSWORD));
+                        }
+
+                        OutputWriter writer = new MySQLOutputWriter(dbPropsFile);
+                        miner.writeRepoSATD(miner.getBaseCommit(headCommit), writer);
+
+                        writer.close();
+                        miner.cleanRepo();
                     }
-                    if (cmd.hasOption(ARG_NAME_GH_PASSWORD)) {
-                        miner.setGithubPassword(cmd.getOptionValue(ARG_NAME_GH_PASSWORD));
-                    }
-
-                    OutputWriter writer = new MySQLOutputWriter(dbPropsFile);
-                    miner.writeRepoSATD(miner.getBaseCommit(headCommit), writer);
-
-                    writer.close();
-                    miner.cleanRepo();
                 }
+            } finally {
+                inFileReader.close();
             }
         } catch (ParseException e) {
             System.err.println(e.getLocalizedMessage());
@@ -174,6 +197,14 @@ public class Main {
                         .argName("0.0-1.0")
                         .desc("the normalized levenshtein distance threshold which determines what similarity " +
                                 "must be met to qualify SATD instances as changed")
+                        .build())
+                .addOption(Option.builder(ARG_NAME_DETECTOR_TYPE)
+                        .longOpt("detector")
+                        .hasArg()
+                        .argName("TYPE")
+                        .desc("the SATD detector to use:\n" +
+                                "- debthunter (default): DebtHunter ML-based detector\n" +
+                                "- satd/original: Original SATD detector")
                         .build());
     }
 

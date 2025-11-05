@@ -1,5 +1,6 @@
 .idea/
-lib/
+lib/*
+!lib/DebtHunter-Tool/
 repos/
 target/
 satd_analyzer.iml

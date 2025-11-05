@@ -56,6 +56,43 @@
             <systemPath>${project.basedir}/lib/satd_detector.jar</systemPath>
         </dependency>
 
+        <!-- DebtHunter Tool Implementation from jar (without JavaParser to avoid conflicts) -->
+        <dependency>
+            <groupId>debthunter</groupId>
+            <artifactId>debthunter</artifactId>
+            <version>productionCode</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/DebtHunter-Tool/DebtHunter-Tool-no-javaparser.jar</systemPath>
+        </dependency>
+
+        <!-- Weka for DebtHunter -->
+        <dependency>
+            <groupId>nz.ac.waikato.cms.weka</groupId>
+            <artifactId>weka-stable</artifactId>
+            <version>3.8.0</version>
+        </dependency>
+
+        <!-- SMOTE for Weka -->
+        <dependency>
+            <groupId>nz.ac.waikato.cms.weka</groupId>
+            <artifactId>SMOTE</artifactId>
+            <version>1.0.3</version>
+        </dependency>
+
+        <!-- GridSearch for Weka -->
+        <dependency>
+            <groupId>nz.ac.waikato.cms.weka</groupId>
+            <artifactId>gridSearch</artifactId>
+            <version>1.0.11</version>
+        </dependency>
+
+        <!-- Apache Commons Math for ML operations -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.4.1</version>
+        </dependency>
+
         <!-- https://mvnrepository.com/artifact/org.eclipse.jgit/org.eclipse.jgit -->
         <dependency>
             <groupId>org.eclipse.jgit</groupId>

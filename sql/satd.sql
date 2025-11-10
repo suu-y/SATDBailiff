@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS satd.Commits, satd.SATD, satd.SATDInFile, satd.Projects;
+DROP TABLE IF EXISTS satd.SATDSnapshots, satd.Commits, satd.SATD, satd.SATDInFile, satd.Projects;
 
 CREATE TABLE IF NOT EXISTS satd.Projects (
 	p_id INT AUTO_INCREMENT NOT NULL,
@@ -49,3 +49,16 @@ CREATE TABLE IF NOT EXISTS satd.SATD (
     FOREIGN KEY (first_file) REFERENCES satd.SATDInFile(f_id),
     FOREIGN KEY (second_file) REFERENCES satd.SATDInFile(f_id)
 ); 
+
+CREATE TABLE IF NOT EXISTS satd.SATDSnapshots (
+    snapshot_id INT AUTO_INCREMENT,
+    commit_hash VARCHAR(256),
+    p_id INT,
+    file_id INT,
+    classification VARCHAR(64),
+    satd_instance_id INT,
+    PRIMARY KEY (snapshot_id),
+    UNIQUE KEY unique_snapshot (commit_hash, p_id, file_id, satd_instance_id),
+    FOREIGN KEY (p_id) REFERENCES satd.Projects(p_id),
+    FOREIGN KEY (file_id) REFERENCES satd.SATDInFile(f_id)
+);

@@ -13,10 +13,13 @@ import org.apache.commons.cli.*;
 import org.eclipse.jgit.diff.DiffAlgorithm;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 
 public class Main {
@@ -30,23 +33,29 @@ public class Main {
     private static final String ARG_NAME_ERROR_OUTPUT = "e";
     private static final String ARG_NAME_NORMALIZED_LEVENSHTEIN_DISTANCE = "l";
     private static final String ARG_NAME_DETECTOR_TYPE = "t";
+    private static final String ARG_NAME_SNAPSHOT_MODE = "s";
     private static final String PROJECT_NAME_CLI = "satd-analyzer";
 
     public static void main(String[] args) throws Exception {
 
         Options options = getOptions();
 
+        boolean captureSnapshots = Arrays.asList(args).contains("--capture-snapshots");
+        List<String> filteredArgs = Arrays.stream(args)
+                .filter(arg -> !arg.equals("--capture-snapshots"))
+                .collect(Collectors.toList());
+
         try {
 
             // Check for help option
             // This is done first to allow both an optional help option and required args
-            if( checkForHelpOption(args) ) {
+            if( checkForHelpOption(filteredArgs.toArray(new String[0])) ) {
                 return; // Only need to print the help options so we are done here
             }
 
             // Parse from command line
             CommandLineParser parser = new DefaultParser();
-            CommandLine cmd = parser.parse(options, args);
+            CommandLine cmd = parser.parse(options, filteredArgs.toArray(new String[0]));
 
             final String reposFile = cmd.getOptionValue(ARG_NAME_REPOS_FILE);
             final String dbPropsFile = cmd.getOptionValue(ARG_NAME_DB_PROPS);
@@ -112,8 +121,7 @@ public class Main {
                     if( repoEntry.length > 0 ) {
 
                         final SATDMiner miner = new SATDMiner(repoEntry[0], detector);
-
-                        final String headCommit = repoEntry.length > 1 ? repoEntry[1] : null;
+                        miner.setCaptureSnapshots(captureSnapshots || cmd.hasOption(ARG_NAME_SNAPSHOT_MODE));
 
                         // Set username and password if supplied
                         if (cmd.hasOption(ARG_NAME_GH_USERNAME)) {
@@ -124,7 +132,27 @@ public class Main {
                         }
 
                         OutputWriter writer = new MySQLOutputWriter(dbPropsFile);
-                        miner.writeRepoSATD(miner.getBaseCommit(headCommit), writer);
+
+                        // Check if multiple releases are specified for release-to-release comparison
+                        if( repoEntry.length >= 2 ) {
+                            // Multiple releases specified: use release-to-release comparison
+                            List<String> releases = new ArrayList<>();
+                            for( int i = 1; i < repoEntry.length; i++ ) {
+                                releases.add(repoEntry[i].trim());
+                            }
+                            if( releases.size() < 2 ) {
+                                System.err.println("Warning: Only one release specified. Falling back to history mode.");
+                                // Fall back to history mode if only one release is specified
+                                final String headCommit = releases.get(0);
+                                miner.writeRepoSATD(miner.getBaseCommit(headCommit), writer);
+                            } else {
+                                // Use release-to-release comparison mode
+                                miner.writeRepoSATDReleases(releases, writer);
+                            }
+                        } else {
+                            // No releases specified: use history mode from HEAD
+                            miner.writeRepoSATD(miner.getBaseCommit(null), writer);
+                        }
 
                         writer.close();
                         miner.cleanRepo();
@@ -205,6 +233,10 @@ public class Main {
                         .desc("the SATD detector to use:\n" +
                                 "- debthunter (default): DebtHunter ML-based detector\n" +
                                 "- satd/original: Original SATD detector")
+                        .build())
+                .addOption(Option.builder(ARG_NAME_SNAPSHOT_MODE)
+                        .longOpt("capture-snapshots")
+                        .desc("stores full SATD snapshots for each analyzed revision")
                         .build());
     }
 

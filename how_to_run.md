@@ -54,6 +54,8 @@ docker build -f Dockerfile.run -t satd-analyzer-debthunter .
 docker run --add-host=host.docker.internal:host-gateway satd-analyzer-debthunter
 ```
 
+> リビジョン全体のSATDスナップショットも保存したい場合は、上記コマンドに `--capture-snapshots` オプションを追加してください。
+
 ### ステップ4: 結果の確認
 
 ```bash

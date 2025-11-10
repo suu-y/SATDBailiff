@@ -59,6 +59,7 @@ public class SATDInstance {
         SATD_REMOVED,
         SATD_CHANGED,
         SATD_ADDED,
+        SATD_STAY,  // SATD maintained unchanged across releases (same comment)
         CLASS_OR_METHOD_CHANGED,
         SATD_MOVED_FILE
     }

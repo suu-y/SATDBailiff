@@ -111,4 +111,28 @@ public class GitUtil {
                 startLine, endLine
         );
     }
+
+    /**
+     * Gets all Java file paths in a commit (excluding test code)
+     * @param gitInstance the Git instance
+     * @param commit the commit to get files from
+     * @return a list of all Java file paths (excluding test code)
+     */
+    public static List<String> getAllJavaFiles(Git gitInstance, RevCommit commit) {
+        List<String> javaFiles = new ArrayList<>();
+        TreeWalk treeWalk = getTreeWalker(gitInstance, commit);
+        try {
+            while (treeWalk.next()) {
+                String filePath = treeWalk.getPathString();
+                // Exclude test code (same as DebtHunter's only-productionCode branch)
+                if (!filePath.contains("/test/") && !filePath.contains("/tests/")) {
+                    javaFiles.add(filePath);
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("\nIOException in getting all Java files.");
+            e.printStackTrace();
+        }
+        return javaFiles;
+    }
 }

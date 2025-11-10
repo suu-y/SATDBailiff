@@ -121,16 +121,21 @@ public class DebtHunterDetectorImpl implements SATDDetector {
     @Override
     public boolean isSATD(String comment) {
         try {
-            // Create instance for the comment
-            DenseInstance instance = new DenseInstance(2);
-            instance.setDataset(this.binaryDatasetStructure);
-            instance.setValue(0, comment);
-
-            // Classify with binary classifier
-            // Returns 0.0 for SATD, 1.0 for non-SATD
-            double classification = this.binaryClassifier.classifyInstance(instance);
+            // First, check if it's SATD with binary classifier
+            DenseInstance binaryInstance = new DenseInstance(2);
+            binaryInstance.setDataset(this.binaryDatasetStructure);
+            binaryInstance.setValue(0, comment);
+            double binaryResult = this.binaryClassifier.classifyInstance(binaryInstance);
             
-            return classification == 0.0;  // true if SATD
+            if (binaryResult == 1.0) {
+                // Not SATD according to binary classifier
+                return false;
+            }
+            
+            // It's SATD according to binary classifier, now check the classification
+            // If classification is WITHOUT_CLASSIFICATION, it's not SATD
+            SATDType type = getSATDType(comment);
+            return type != SATDType.WITHOUT_CLASSIFICATION;
         } catch (Exception e) {
             System.err.println("Error classifying comment: " + e.getMessage());
             return false;

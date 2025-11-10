@@ -4,6 +4,7 @@ import edu.rit.se.git.model.CommitMetaData;
 import edu.rit.se.satd.comment.model.GroupedComment;
 import edu.rit.se.satd.model.SATDDifference;
 import edu.rit.se.satd.model.SATDInstance;
+import edu.rit.se.satd.model.SATDSnapshot;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -75,13 +76,25 @@ public class MySQLOutputWriter implements OutputWriter {
             conn = null;
             final Thread writeLastAsync = new Thread(() -> {
                 try {
+                    System.out.println("DEBUG: Writing " + diff.getSatdInstances().size() + " SATD instances to database");
+                    int successCount = 0;
+                    int errorCount = 0;
                     for (SATDInstance satdInstance : diff.getSatdInstances()) {
-                        final int oldFileId = this.getSATDInFileId(asyncConn, satdInstance, true);
-                        final int newFileId = this.getSATDInFileId(asyncConn, satdInstance, false);
-                        this.getSATDInstanceId(asyncConn, satdInstance, newCommitId, oldCommitId, newFileId, oldFileId, projectId);
+                        try {
+                            final int oldFileId = this.getSATDInFileId(asyncConn, satdInstance, true);
+                            final int newFileId = this.getSATDInFileId(asyncConn, satdInstance, false);
+                            this.getSATDInstanceId(asyncConn, satdInstance, newCommitId, oldCommitId, newFileId, oldFileId, projectId);
+                            successCount++;
+                        } catch (SQLException e) {
+                            errorCount++;
+                            System.err.println("Error writing SATD instance: " + e.getMessage());
+                            e.printStackTrace();
+                        }
                     }
-                } catch (SQLException e) {
-                    throw new UncheckedIOException(new IOException(e));
+                    System.out.println("DEBUG: Successfully wrote " + successCount + " SATD instances, " + errorCount + " errors");
+                } catch (Exception e) {
+                    System.err.println("Fatal error in async write: " + e.getMessage());
+                    e.printStackTrace();
                 } finally {
                     try {
                         asyncConn.close();
@@ -154,47 +167,9 @@ public class MySQLOutputWriter implements OutputWriter {
         // Get the correct values from the SATD Instance
         final String filePath = useOld ? satdInstance.getOldInstance().getFileName()
                 : satdInstance.getNewInstance().getFileName();
-        final int startLineNumber = useOld ? satdInstance.getStartLineNumberOldFile()
-                : satdInstance.getStartLineNumberNewFile();
-        final int endLineNumber = useOld ? satdInstance.getEndLineNumberOldFile()
-                : satdInstance.getEndLineNumberNewFile();
         final GroupedComment comment = useOld ? satdInstance.getOldInstance().getComment() :
                 satdInstance.getNewInstance().getComment();
-        final PreparedStatement queryStmt = conn.prepareStatement(
-                "SELECT SATDInFile.f_id FROM SATDInFile WHERE " +
-                "SATDInFile.f_comment=? AND SATDInFile.f_path=? AND " +
-                "SATDInFile.start_line=? AND SATDInFile.end_line=?");
-        queryStmt.setString(1, shortenStringToLength(
-                comment.getComment().replace("\"", "\\\""), COMMENTS_MAX_CHARS)); // f_comment
-        queryStmt.setString(2, filePath); // f_path
-        queryStmt.setInt(3, startLineNumber); // start_line
-        queryStmt.setInt(4, endLineNumber); // end_line
-        final ResultSet res = queryStmt.executeQuery();
-        if( res.next() ) {
-            // Return the result if one was found
-            return res.getInt(1);
-        } else {
-            // Otherwise, add it and then return the newly generated key
-            final PreparedStatement updateStmt = conn.prepareStatement(
-                    "INSERT INTO SATDInFile(f_comment, f_comment_type, f_path, start_line, end_line, " +
-                            "containing_class, containing_method) " +
-                            "VALUES (?,?,?,?,?,?,?);",
-                    Statement.RETURN_GENERATED_KEYS);
-            updateStmt.setString(1, shortenStringToLength(
-                    comment.getComment().replace("\"", "\\\""), COMMENTS_MAX_CHARS)); // f_comment
-            updateStmt.setString(2, comment.getCommentType()); // f_comment_type
-            updateStmt.setString(3, filePath); // f_path
-            updateStmt.setInt(4, startLineNumber); // start_line
-            updateStmt.setInt(5, endLineNumber); // end_line
-            updateStmt.setString(6, comment.getContainingClass());
-            updateStmt.setString(7, comment.getContainingMethod());
-            updateStmt.executeUpdate();
-            final ResultSet updateRes = updateStmt.getGeneratedKeys();
-            if (updateRes.next()) {
-                return updateRes.getInt(1);
-            }
-        }
-        throw new SQLException("Could not obtain a file instance ID.");
+        return getOrCreateSATDInFile(conn, filePath, comment);
     }
 
     private int getSATDInstanceId(Connection conn, SATDInstance satdInstance,
@@ -286,10 +261,103 @@ public class MySQLOutputWriter implements OutputWriter {
         return str.substring(0, Math.min(str.length(), length));
     }
 
+    private int getOrCreateSATDInFile(Connection conn, String filePath, GroupedComment comment) throws SQLException {
+        final PreparedStatement queryStmt = conn.prepareStatement(
+                "SELECT SATDInFile.f_id FROM SATDInFile WHERE " +
+                        "SATDInFile.f_comment=? AND SATDInFile.f_path=? AND " +
+                        "SATDInFile.start_line=? AND SATDInFile.end_line=?");
+        queryStmt.setString(1, shortenStringToLength(
+                comment.getComment().replace("\"", "\\\""), COMMENTS_MAX_CHARS));
+        queryStmt.setString(2, filePath);
+        queryStmt.setInt(3, comment.getStartLine());
+        queryStmt.setInt(4, comment.getEndLine());
+        final ResultSet res = queryStmt.executeQuery();
+        if (res.next()) {
+            return res.getInt(1);
+        } else {
+            final PreparedStatement updateStmt = conn.prepareStatement(
+                    "INSERT INTO SATDInFile(f_comment, f_comment_type, f_path, start_line, end_line, " +
+                            "containing_class, containing_method) VALUES (?,?,?,?,?,?,?);",
+                    Statement.RETURN_GENERATED_KEYS);
+            updateStmt.setString(1, shortenStringToLength(
+                    comment.getComment().replace("\"", "\\\""), COMMENTS_MAX_CHARS));
+            updateStmt.setString(2, comment.getCommentType());
+            updateStmt.setString(3, filePath);
+            updateStmt.setInt(4, comment.getStartLine());
+            updateStmt.setInt(5, comment.getEndLine());
+            updateStmt.setString(6, comment.getContainingClass());
+            updateStmt.setString(7, comment.getContainingMethod());
+            updateStmt.executeUpdate();
+            final ResultSet updateRes = updateStmt.getGeneratedKeys();
+            if (updateRes.next()) {
+                return updateRes.getInt(1);
+            }
+        }
+        throw new SQLException("Could not obtain a file instance ID.");
+    }
+
+    private void insertSnapshotEntry(Connection conn, String commitHash, int projectId, int fileId,
+                                     SATDSnapshot.SATDSnapshotEntry entry) throws SQLException {
+        final PreparedStatement updateStmt = conn.prepareStatement(
+                "INSERT INTO SATDSnapshots(commit_hash, p_id, file_id, classification, satd_instance_id) " +
+                        "VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE classification=VALUES(classification)");
+        updateStmt.setString(1, commitHash);
+        updateStmt.setInt(2, projectId);
+        updateStmt.setInt(3, fileId);
+        updateStmt.setString(4, entry.getClassification());
+        updateStmt.setInt(5, entry.getSnapshotInstanceId());
+        updateStmt.executeUpdate();
+    }
+
+    @Override
+    public void writeSnapshot(SATDSnapshot snapshot) throws IOException {
+        Connection conn = null;
+        try {
+            conn = DriverManager.getConnection(this.dbURI, this.user, this.pass);
+            int projectId;
+            if (this.cachedProjectKeys.containsKey(snapshot.getProjectName())) {
+                projectId = this.cachedProjectKeys.get(snapshot.getProjectName());
+            } else {
+                projectId = this.getProjectId(conn, snapshot.getProjectName(), snapshot.getProjectURI());
+                this.cachedProjectKeys.put(snapshot.getProjectName(), projectId);
+            }
+
+            this.getCommitId(conn, new CommitMetaData(snapshot.getCommit()), projectId);
+            final String commitHash = snapshot.getCommit().getName();
+
+            for (SATDSnapshot.SATDSnapshotEntry entry : snapshot.getEntries()) {
+                int fileId = this.getOrCreateSATDInFile(conn, entry.getFilePath(), entry.getComment());
+                this.insertSnapshotEntry(conn, commitHash, projectId, fileId, entry);
+            }
+        } catch (SQLException e) {
+            throw new IOException(e);
+        } finally {
+            if (conn != null) {
+                try {
+                    conn.close();
+                } catch (SQLException e) {
+                    System.err.println("Error closing SQL connection");
+                }
+            }
+        }
+    }
+
     @Override
     public void close() {
-        // Shutdown the executor and then run each remaining task
-        this.finalWriteExecutor.shutdownNow().forEach(Runnable::run);
+        // Shutdown the executor gracefully
+        this.finalWriteExecutor.shutdown();
+        try {
+            // Wait for all scheduled tasks to complete (with timeout)
+            if (!this.finalWriteExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
+                // If timeout, force shutdown
+                System.err.println("Warning: Some async write tasks did not complete within timeout");
+                this.finalWriteExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            System.err.println("Interrupted while waiting for async write tasks to complete");
+            this.finalWriteExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
 

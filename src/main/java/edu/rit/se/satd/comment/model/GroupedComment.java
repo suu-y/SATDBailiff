@@ -7,12 +7,12 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.comments.Comment;
-import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import edu.rit.se.util.JavaParseUtil;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -27,7 +27,7 @@ import static edu.rit.se.util.JavaParseUtil.NULL_RANGE;
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE) // For internal use only
 @AllArgsConstructor(access = AccessLevel.PROTECTED) // For internal use only
-public class GroupedComment implements Comparable {
+public class GroupedComment implements Comparable<GroupedComment> {
 
     private static final String UNKNOWN = "None";
 
@@ -39,6 +39,9 @@ public class GroupedComment implements Comparable {
     private String comment = UNKNOWN;
     @Getter
     private String commentType = UNKNOWN;
+    @Getter
+    @Setter
+    private String satdClassification = UNKNOWN;
     @Getter
     private String containingClass = UNKNOWN;
     @Getter
@@ -73,6 +76,7 @@ public class GroupedComment implements Comparable {
                         String.join("\n", this.comment, other.comment) :
                         String.join("\n", other.comment, this.comment),
                 this.commentType,
+                this.satdClassification,
                 this.containingClass,
                 this.containingClassDeclarationLineStart,
                 this.containingClassDeclarationLineEnd,
@@ -96,6 +100,27 @@ public class GroupedComment implements Comparable {
         return 1 + this.endLine - this.startLine;
     }
 
+    public static GroupedComment fromDebtHunterData(int startLine, int endLine, String comment,
+                                                    String containingClass, String containingMethod) {
+        String normalizedComment = comment != null ? comment : "";
+        String normalizedClass = (containingClass != null && !containingClass.isEmpty()) ? containingClass : UNKNOWN;
+        String normalizedMethod = (containingMethod != null && !containingMethod.isEmpty()) ? containingMethod : UNKNOWN;
+        GroupedComment groupedComment = new GroupedComment(
+                startLine,
+                endLine,
+                normalizedComment,
+                TYPE_LINE,
+                UNKNOWN,
+                normalizedClass,
+                -1,
+                -1,
+                normalizedMethod,
+                -1,
+                -1
+        );
+        return groupedComment;
+    }
+
     /**
      * Removes Java-syntax items from comment lines
      * @param commentLine a line of a java comment
@@ -110,11 +135,11 @@ public class GroupedComment implements Comparable {
     }
 
     @Override
-    public int compareTo(Object o) {
-        if( o instanceof GroupedComment ) {
-            if( this.startLine > ((GroupedComment) o).startLine ) {
+    public int compareTo(GroupedComment other) {
+        if( other != null ) {
+            if( this.startLine > other.startLine ) {
                 return 1;
-            } else if( this.startLine < ((GroupedComment) o).startLine ) {
+            } else if( this.startLine < other.startLine ) {
                 return -1;
             }
             return 0;
@@ -140,11 +165,9 @@ public class GroupedComment implements Comparable {
 
     public static GroupedComment fromJavaParserComment(Comment oldComment) {
         final GroupedComment newComment = new GroupedComment();
-        // Line numbers
-        if( oldComment.getRange().isPresent() ) {
-            newComment.startLine = oldComment.getRange().get().begin.line;
-            newComment.endLine = oldComment.getRange().get().end.line;
-        }
+        // Line numbers - use getBegin()/getEnd() to match DebtHunter's approach
+        newComment.startLine = oldComment.getBegin().map(p -> p.line).orElse(-1);
+        newComment.endLine = oldComment.getEnd().map(p -> p.line).orElse(-1);
         // Clean up and set comment
         newComment.comment = Arrays.stream(oldComment.getContent().trim().split("\n"))
                 .map(GroupedComment::cleanCommentLine)

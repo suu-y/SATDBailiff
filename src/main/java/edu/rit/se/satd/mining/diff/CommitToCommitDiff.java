@@ -38,31 +38,57 @@ public class CommitToCommitDiff {
     public List<String> getModifiedFilesNew() {
         return this.diffEntries.stream()
                 .map(DiffEntry::getNewPath)
+                .filter(path -> !path.contains("/test/") && !path.contains("/tests/"))  // Exclude test code
                 .collect(Collectors.toList());
     }
 
     public List<String> getModifiedFilesOld() {
         return this.diffEntries.stream()
                 .map(DiffEntry::getOldPath)
+                .filter(path -> !path.contains("/test/") && !path.contains("/tests/"))  // Exclude test code
                 .collect(Collectors.toList());
     }
 
     public List<SATDInstance> loadDiffsForOldFile(String oldFile, GroupedComment comment) {
-        return this.loadDiffsForFile(oldFile, comment,
-                new OldFileDifferencer(this.gitInstance, this.newCommit, this.detector, this.diffEntries));
+        return this.loadDiffsForOldFile(oldFile, comment, true);
+    }
 
+    public List<SATDInstance> loadDiffsForOldFile(String oldFile, GroupedComment comment, boolean isDirectParent) {
+        return this.loadDiffsForFile(oldFile, comment,
+                new OldFileDifferencer(this.gitInstance, this.newCommit, this.detector, this.diffEntries), isDirectParent);
     }
 
     public List<SATDInstance> loadDiffsForNewFile(String newFile, GroupedComment comment) {
-        return this.loadDiffsForFile(newFile, comment, new NewFileDifferencer(this.gitInstance));
+        return this.loadDiffsForNewFile(newFile, comment, true);
     }
 
-    private List<SATDInstance> loadDiffsForFile(String file, GroupedComment comment, FileDifferencer differ) {
-        return this.diffEntries.stream()
+    public List<SATDInstance> loadDiffsForNewFile(String newFile, GroupedComment comment, boolean isDirectParent) {
+        return this.loadDiffsForFile(newFile, comment, new NewFileDifferencer(this.gitInstance), isDirectParent);
+    }
+
+    private List<SATDInstance> loadDiffsForFile(String file, GroupedComment comment, FileDifferencer differ, boolean isDirectParent) {
+        List<SATDInstance> instances = this.diffEntries.stream()
                 .filter(entry -> differ.getPertinentFilePath(entry).equals(file))
                 .map(diffEntry -> differ.getInstancesFromFile(diffEntry, comment))
                 .flatMap(Collection::stream)
                 .collect(Collectors.toList());
+        
+        // For release-to-release comparison, if file wasn't modified, create a SATD instance
+        // to indicate it exists in both releases
+        if (!isDirectParent && instances.isEmpty()) {
+            // Check if file exists in diffEntries (was modified)
+            boolean fileWasModified = this.diffEntries.stream()
+                    .anyMatch(entry -> differ.getPertinentFilePath(entry).equals(file));
+            
+            // If file wasn't modified, the SATD exists in both releases unchanged
+            if (!fileWasModified) {
+                // Return empty list - unchanged SATD will be handled in RepositoryDiffMiner
+                // by checking mapped SATD instances
+                return new ArrayList<>();
+            }
+        }
+        
+        return instances;
     }
 
 }

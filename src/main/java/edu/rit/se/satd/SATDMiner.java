@@ -4,6 +4,7 @@ import edu.rit.se.git.DevNullCommitReference;
 import edu.rit.se.git.GitUtil;
 import edu.rit.se.git.RepositoryCommitReference;
 import edu.rit.se.git.RepositoryInitializer;
+import edu.rit.se.satd.comment.model.RepositoryComments;
 import edu.rit.se.satd.detector.SATDDetector;
 import edu.rit.se.satd.mining.RepositoryDiffMiner;
 import edu.rit.se.satd.mining.ui.ElapsedTimer;
@@ -11,6 +12,7 @@ import edu.rit.se.satd.mining.ui.MinerStatus;
 import edu.rit.se.satd.model.SATDDifference;
 import edu.rit.se.satd.model.SATDInstance;
 import edu.rit.se.satd.model.SATDInstanceInFile;
+import edu.rit.se.satd.model.SATDSnapshot;
 import edu.rit.se.satd.writer.OutputWriter;
 import lombok.Getter;
 import lombok.NonNull;
@@ -50,6 +52,8 @@ public class SATDMiner {
 
     private ElapsedTimer timer = new ElapsedTimer();
 
+    private boolean captureSnapshots = false;
+
     private int curSATDId;
 
     @Getter
@@ -61,6 +65,10 @@ public class SATDMiner {
         this.status = new MinerStatus(GitUtil.getRepoNameFromGithubURI(this.repositoryURI));
         // Start the SATD ID incrementing on a unique value for each repository
         this.curSATDId = this.repositoryURI.hashCode();
+    }
+
+    public void setCaptureSnapshots(boolean captureSnapshots) {
+        this.captureSnapshots = captureSnapshots;
     }
 
     public void disableStatusOutput() {
@@ -137,6 +145,78 @@ public class SATDMiner {
 
     }
 
+    /**
+     * Analyzes SATD differences between specified releases/commits.
+     * This method compares adjacent releases (e.g., release1 -> release2, release2 -> release3)
+     * instead of analyzing the entire commit history.
+     * @param releases a list of release tags or commit hashes to compare
+     * @param writer an OutputWriter that will handle the output of the miner
+     */
+    public void writeRepoSATDReleases(List<String> releases, OutputWriter writer) {
+        if( releases == null || releases.isEmpty() ) {
+            this.status.setError();
+            return;
+        }
+        if( releases.size() < 2 ) {
+            System.err.println("At least 2 releases are required for comparison");
+            this.status.setError();
+            return;
+        }
+
+        this.timer.start();
+        this.status.beginInitialization();
+        if( (repo == null || !repo.didInitialize()) &&
+                !this.initializeRepo(this.githubUsername, this.githubPassword) ) {
+            System.err.println("Repository failed to initialize");
+            this.status.setError();
+            return;
+        }
+
+        // Get commit references for all specified releases
+        List<RepositoryCommitReference> releaseRefs = new ArrayList<>();
+        for( String release : releases ) {
+            RepositoryCommitReference ref = this.repo.getMostRecentCommit(release);
+            if( ref == null ) {
+                System.err.println("Could not resolve release/commit: " + release);
+                this.status.setError();
+                return;
+            }
+            releaseRefs.add(ref);
+        }
+
+        if (this.captureSnapshots) {
+            this.writeSnapshotsForReleaseRefs(releaseRefs, writer);
+        }
+
+        this.status.beginCalculatingDiffs();
+        final List<DiffPair> releaseDiffPairs = this.getReleaseDiffPairs(releaseRefs);
+
+        this.status.beginMiningSATD();
+        this.status.setNDiffsPromised(releaseDiffPairs.size());
+
+        releaseDiffPairs.stream()
+                .map(pair -> new RepositoryDiffMiner(pair.parentRepo, pair.repo, this.satdDetector))
+                .map(repositoryDiffMiner -> {
+                    this.status.setDisplayWindow(repositoryDiffMiner.getDiffString());
+                    return repositoryDiffMiner.mineDiff();
+                })
+                .map(diff -> {
+                    System.out.println("DEBUG: SATD instances before mapping: " + diff.getSatdInstances().size());
+                    return this.mapInstancesInDiffToPriorInstances(diff);
+                })
+                .forEach(diff -> {
+                    try {
+                        System.out.println("DEBUG: SATD instances after mapping: " + diff.getSatdInstances().size());
+                        writer.writeDiff(diff);
+                        this.status.fulfilDiffPromise();
+                    } catch (IOException e) {
+                        this.status.addErrorEncountered();
+                        System.err.println("Error writing diff: " + e.getLocalizedMessage());
+                        e.printStackTrace();
+                    }
+                });
+    }
+
     private boolean initializeRepo(String username, String password) {
         this.repo = ( username != null && password != null ) ?
                 new RepositoryInitializer(this.repositoryURI, GitUtil.getRepoNameFromGithubURI(this.repositoryURI),
@@ -176,6 +256,53 @@ public class SATDMiner {
     }
 
     /**
+     * Creates DiffPairs between adjacent releases only.
+     * This method creates pairs: (release[0], release[1]), (release[1], release[2]), ...
+     * @param releaseRefs a list of RepositoryCommitReferences for the releases to compare
+     * @return a list of DiffPairs representing differences between adjacent releases
+     */
+    private List<DiffPair> getReleaseDiffPairs(List<RepositoryCommitReference> releaseRefs) {
+        List<DiffPair> diffPairs = new ArrayList<>();
+        
+        for( int i = 1; i < releaseRefs.size(); i++ ) {
+            RepositoryCommitReference newerRelease = releaseRefs.get(i);
+            RepositoryCommitReference olderRelease = releaseRefs.get(i - 1);
+            
+            // Create a DiffPair: (newerRelease, olderRelease)
+            // This represents the changes from olderRelease to newerRelease
+            diffPairs.add(new DiffPair(newerRelease, olderRelease));
+        }
+        
+        return diffPairs;
+    }
+
+    private void writeSnapshotsForReleaseRefs(List<RepositoryCommitReference> releaseRefs, OutputWriter writer) {
+        releaseRefs.forEach(ref -> {
+            Map<String, RepositoryComments> commentsByFile = ref.getFilesToSATDOccurrences(this.satdDetector, null);
+            if (commentsByFile.isEmpty()) {
+                return;
+            }
+            SATDSnapshot snapshot = new SATDSnapshot(ref.getProjectName(), ref.getProjectURI(), ref.getCommit());
+            commentsByFile.forEach((filePath, repositoryComments) -> repositoryComments.getComments()
+                    .forEach(comment -> {
+                        String classification = comment.getSatdClassification();
+                        if (classification != null
+                                && !classification.trim().isEmpty()
+                                && !"None".equalsIgnoreCase(classification)) {
+                            snapshot.addEntry(new SATDSnapshot.SATDSnapshotEntry(filePath, comment, classification));
+                        }
+                    }));
+            if (!snapshot.getEntries().isEmpty()) {
+                try {
+                    writer.writeSnapshot(snapshot);
+                } catch (IOException e) {
+                    System.err.println("Failed to write SATD snapshot for commit " + ref.getCommitHash() + ": " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /**
      * Associates all SATDInstances in the diff object with other instances found
      * in this project and removes duplicate entries
      * @param diff an SATDDifference object
@@ -183,9 +310,8 @@ public class SATDMiner {
      */
     private SATDDifference mapInstancesInDiffToPriorInstances(SATDDifference diff) {
         return diff.usingNewInstances(
-                diff.getSatdInstances().stream()
-                        .distinct()
-                        .map(this::mapInstanceToNewInstanceId)
+               diff.getSatdInstances().stream()
+                       .map(this::mapInstanceToNewInstanceId)
                         .collect(Collectors.toList())
         );
     }
@@ -213,7 +339,7 @@ public class SATDMiner {
                 }
                 satdInstance.setId(this.satdInstanceMappings.get(satdInstance.getNewInstance()));
                 break;
-            case SATD_CHANGED: case FILE_PATH_CHANGED: case CLASS_OR_METHOD_CHANGED:
+            case SATD_CHANGED: case FILE_PATH_CHANGED: case CLASS_OR_METHOD_CHANGED: case SATD_STAY:
                 // SATD was changed from the previous version, so update it here
                 if( !this.satdInstanceMappings.containsKey(satdInstance.getOldInstance()) ) {
                     // Looks like we cannot find the old SATD Instance for whatever reason
@@ -270,7 +396,7 @@ public class SATDMiner {
     }
 
     @RequiredArgsConstructor
-    public class DiffPair implements Comparable {
+    public class DiffPair implements Comparable<DiffPair> {
 
         @NonNull
         @Getter
@@ -294,17 +420,14 @@ public class SATDMiner {
         }
 
         @Override
-        public int compareTo(Object o) {
-            if( o instanceof DiffPair ) {
-                int commitTimeDiff = this.repo.getCommitTime() - ((DiffPair) o).repo.getCommitTime();
-                // If the commits were committed at the same time, look at the authored date
-                // to determine which came first
-                if( commitTimeDiff == 0 ) {
-                    return Long.compare(this.repo.getAuthoredTime(), ((DiffPair) o).repo.getAuthoredTime());
-                }
-                return commitTimeDiff;
+        public int compareTo(DiffPair o) {
+            int commitTimeDiff = this.repo.getCommitTime() - o.repo.getCommitTime();
+            // If the commits were committed at the same time, look at the authored date
+            // to determine which came first
+            if( commitTimeDiff == 0 ) {
+                return Long.compare(this.repo.getAuthoredTime(), o.repo.getAuthoredTime());
             }
-            return -1;
+            return commitTimeDiff;
         }
     }
 }
